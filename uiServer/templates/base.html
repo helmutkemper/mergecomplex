@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.Title}}</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Menu Vertical -->
+        <nav class="sidebar">
+            <div class="logo">
+                <i class="fas fa-code"></i>
+                <h2>Monaco Site</h2>
+            </div>
+            <ul class="menu">
+                <li class="{{if eq .CurrentPage "home"}}active{{end}}">
+                    <a href="/">
+                        <i class="fas fa-home"></i>
+                        <span>Home</span>
+                    </a>
+                </li>
+                <li class="{{if eq .CurrentPage "editor"}}active{{end}}">
+                    <a href="/editor">
+                        <i class="fas fa-edit"></i>
+                        <span>Editor</span>
+                    </a>
+                </li>
+                <li class="{{if eq .CurrentPage "diff"}}active{{end}}">
+                    <a href="/diff">
+                        <i class="fas fa-code-compare"></i>
+                        <span>Diff Editor</span>
+                    </a>
+                </li>
+                <li class="{{if eq .CurrentPage "about"}}active{{end}}">
+                    <a href="/about">
+                        <i class="fas fa-info-circle"></i>
+                        <span>Sobre</span>
+                    </a>
+                </li>
+            </ul>
+        </nav>
+
+        <!-- Conteúdo Principal -->
+        <main class="content">
+            {{template "content" .}}
+        </main>
+    </div>
+</body>
+</html>

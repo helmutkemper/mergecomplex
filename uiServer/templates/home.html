@@ -1,0 +1,63 @@
+{{template "base.html" .}}
+
+{{define "content"}}
+<div class="home-content">
+    <h1><i class="fas fa-rocket"></i> Bem-vindo ao Monaco Editor Site</h1>
+
+    <section class="intro">
+        <p class="lead">
+            Este projeto demonstra a integração do poderoso <strong>Monaco Editor</strong>
+            (o mesmo editor usado no Visual Studio Code) com um servidor web em <strong>Go</strong>.
+        </p>
+    </section>
+
+    <section class="features">
+        <h2><i class="fas fa-star"></i> Características do Projeto</h2>
+        <div class="feature-grid">
+            <div class="feature-card">
+                <i class="fas fa-code feature-icon"></i>
+                <h3>Monaco Editor</h3>
+                <p>Editor de código completo com syntax highlighting, autocomplete e temas personalizáveis.</p>
+            </div>
+
+            <div class="feature-card">
+                <i class="fab fa-golang feature-icon"></i>
+                <h3>Servidor Go</h3>
+                <p>Backend leve e performático usando a linguagem Go para servir o aplicativo.</p>
+            </div>
+
+            <div class="feature-card">
+                <i class="fas fa-bars feature-icon"></i>
+                <h3>Menu Intuitivo</h3>
+                <p>Navegação lateral com ícones Font Awesome para fácil acesso às funcionalidades.</p>
+            </div>
+
+            <div class="feature-card">
+                <i class="fab fa-oss feature-icon"></i>
+                <h3>Open Source</h3>
+                <p>Projeto totalmente open source, utilizando apenas tecnologias livres e gratuitas.</p>
+            </div>
+        </div>
+    </section>
+
+    <section class="tech-stack">
+        <h2><i class="fas fa-layer-group"></i> Tecnologias Utilizadas</h2>
+        <ul class="tech-list">
+            <li><i class="fab fa-golang"></i> <strong>Go (Golang)</strong> - Linguagem de programação para o backend</li>
+            <li><i class="fas fa-code"></i> <strong>Monaco Editor</strong> - Editor de código da Microsoft</li>
+            <li><i class="fab fa-font-awesome"></i> <strong>Font Awesome Free</strong> - Biblioteca de ícones</li>
+            <li><i class="fab fa-html5"></i> <strong>HTML5 & CSS3</strong> - Estrutura e estilo da interface</li>
+        </ul>
+    </section>
+
+    <section class="getting-started">
+        <h2><i class="fas fa-play-circle"></i> Como Começar</h2>
+        <p>Navegue pelo menu lateral para:</p>
+        <ol>
+            <li><strong>Editor</strong> - Experimente o Monaco Editor em ação</li>
+            <li><strong>Diff Editor</strong> - Compare dois arquivos lado a lado</li>
+            <li><strong>Sobre</strong> - Saiba mais sobre o projeto e suas funcionalidades</li>
+        </ol>
+    </section>
+</div>
+{{end}}

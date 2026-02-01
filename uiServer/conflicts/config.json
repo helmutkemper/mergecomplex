@@ -1,0 +1,12 @@
+{
+<<<<<<< HEAD
+	"port": 8080,
+	"host": "localhost",
+	"debug": true
+=======
+	"port": 9090,
+	"host": "0.0.0.0",
+	"debug": false,
+	"timeout": 30
+>>>>>>> feature/login
+}

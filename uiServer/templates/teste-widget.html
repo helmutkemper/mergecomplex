@@ -1,0 +1,64 @@
+{{define "content"}}
+<div style="width:100%; height:calc(100vh - 120px);">
+    <div id="teste-editor" style="width:100%; height:100%;"></div>
+</div>
+
+<script src="/static/monaco-editor/min/vs/loader.js"></script>
+<script>
+    require.config({
+        paths: { 'vs': '/static/monaco-editor/min/vs' }
+    });
+
+    require(['vs/editor/editor.main'], function () {
+        const texto = [
+            'package main',
+            '',
+            'import "fmt"',
+            '',
+            '<<<<<<< HEAD',
+            '    fmt.Println("versão HEAD")',
+            '=======',
+            '    fmt.Println("versão remota")',
+            '>>>>>>> feature/login',
+            '',
+            'func main() {',
+            '}',
+        ].join('\n');
+
+        const editor = monaco.editor.create(
+            document.getElementById('teste-editor'),
+            {
+                value: texto,
+                language: 'go',
+                theme: 'vs-dark',
+                readOnly: false,
+                fontSize: 14,
+                automaticLayout: true,
+            }
+        );
+
+        // Tenta adicionar widget na linha 5 (onde está o <<<<<<<)
+        const domNode = document.createElement('div');
+        domNode.style.cssText = 'background:#ff0000; color:#fff; padding:4px 10px; border-radius:4px; font-size:12px; white-space:nowrap; z-index:9999;';
+        domNode.textContent = '>>> WIDGET TESTE - você me vê? <<<';
+
+        const widget = {
+            getId: function() { return 'teste-widget'; },
+            getDomNode: function() { return domNode; },
+            getPosition: function() {
+                return {
+                    position: { lineNumber: 5, column: 1 },
+                    range: new monaco.Range(5, 1, 5, 2),
+                    preference: [
+                        monaco.editor.ContentWidgetPositionPreference.ABOVE,
+                        monaco.editor.ContentWidgetPositionPreference.BELOW
+                    ]
+                };
+            }
+        };
+
+        editor.addContentWidget(widget);
+        console.log('Widget adicionado na linha 5');
+    });
+</script>
+{{end}}

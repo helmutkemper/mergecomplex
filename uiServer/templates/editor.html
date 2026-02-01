@@ -1,0 +1,153 @@
+{{template "base.html" .}}
+
+{{define "content"}}
+<div class="editor-content"><!-- ********************************************** -->
+    <div class="editor-header">
+        <h1><i class="fas fa-edit"></i> ** Monaco Diff Editor</h1>
+        <div class="editor-controls">
+            <label for="language-select">
+                <i class="fas fa-code"></i> Linguagem:
+            </label>
+            <select id="language-select">
+                <option value="javascript">JavaScript</option>
+                <option value="typescript">TypeScript</option>
+                <option value="python">Python</option>
+                <option value="go">Go</option>
+                <option value="html">HTML</option>
+                <option value="css">CSS</option>
+                <option value="json">JSON</option>
+                <option value="markdown">Markdown</option>
+            </select>
+
+            <label for="theme-select">
+                <i class="fas fa-palette"></i> Tema:
+            </label>
+            <select id="theme-select">
+                <option value="vs">Visual Studio Light</option>
+                <option value="vs-dark" selected>Visual Studio Dark</option>
+                <option value="hc-black">High Contrast</option>
+            </select>
+
+            <label>
+                <input type="checkbox" id="inline-toggle" checked>
+                <i class="fas fa-columns"></i> Lado a lado
+            </label>
+        </div>
+    </div>
+
+    <div class="diff-labels">
+        <div class="diff-label original">
+            <i class="fas fa-file-alt"></i> Original
+        </div>
+        <div class="diff-label modified">
+            <i class="fas fa-file-alt"></i> Modificado
+        </div>
+    </div>
+
+    <div id="editor-container"></div>
+</div>
+
+<script src="static/monaco-editor/min/vs/loader.js"></script>
+<script>
+    require.config({
+        paths: {
+            'vs': '/static/monaco-editor/min/vs'
+        }
+    });
+
+    let diffEditor;
+
+    require(['vs/editor/editor.main'], function () {
+        // =========================================================
+        // Texto original (arquivo "antes")
+        // =========================================================
+        const originalText = `package main
+
+import (
+    "fmt"
+)
+
+func main() {
+    message := "Hello, World!"
+    fmt.Println(message)
+}
+
+func add(a, b int) int {
+    return a + b
+}`;
+
+        // =========================================================
+        // Texto modificado (arquivo "depois")
+        // =========================================================
+        const modifiedText = `package main
+
+import (
+    "fmt"
+    "os"
+)
+
+func main() {
+    message := "Hello, Monaco Diff Editor!"
+    fmt.Println(message)
+
+    args := os.Args
+    if len(args) > 1 {
+        fmt.Println("Argumento recebido:", args[1])
+    }
+}
+
+// add retorna a soma de dois inteiros
+func add(a, b int) int {
+    return a + b
+}
+
+// multiply retorna o produto de dois inteiros
+func multiply(a, b int) int {
+    return a * b
+}`;
+
+        // =========================================================
+        // Criação do Diff Editor
+        // =========================================================
+        diffEditor = monaco.editor.createDiffEditor(
+            document.getElementById('editor-container'),
+            {
+                theme: 'vs-dark',
+                automaticLayout: true,
+                renderSideBySide: true,
+                readOnly: false,
+                fontSize: 14,
+                minimap: { enabled: true },
+                scrollBeyondLastLine: false,
+                wordWrap: 'on',
+                // Opções específicas do diff
+                enableSplitViewButton: true,
+                isInDiffMiddleButton: true,
+            }
+        );
+
+        // Atribuir modelos original e modificado
+        diffEditor.setModel({
+            original: monaco.editor.createModel(originalText, 'go'),
+            modified: monaco.editor.createModel(modifiedText, 'go'),
+        });
+
+        // =========================================================
+        // Eventos: linguagem, tema, lado a lado / inline
+        // =========================================================
+        document.getElementById('language-select').addEventListener('change', function (e) {
+            const lang = e.target.value;
+            monaco.editor.setModelLanguage(diffEditor.getOriginalEditor().getModel(), lang);
+            monaco.editor.setModelLanguage(diffEditor.getModifiedEditor().getModel(), lang);
+        });
+
+        document.getElementById('theme-select').addEventListener('change', function (e) {
+            monaco.editor.setTheme(e.target.value);
+        });
+
+        document.getElementById('inline-toggle').addEventListener('change', function (e) {
+            diffEditor.updateOptions({ renderSideBySide: e.target.checked });
+        });
+    });
+</script>
+{{end}}
