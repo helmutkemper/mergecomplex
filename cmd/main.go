@@ -2,6 +2,9 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
+	"gitmerge/internal/git"
 	"html/template"
 	"log"
 	"net/http"
@@ -9,6 +12,10 @@ import (
 	"path/filepath"
 	"strings"
 )
+
+type ErrorStr struct {
+	Error string
+}
 
 type PageData struct {
 	Title       string
@@ -19,6 +26,11 @@ type PageData struct {
 const conflictDir = "conflicts"
 
 func renderTemplate(w http.ResponseWriter, page string, data PageData) {
+	d, _ := os.ReadDir(".")
+	for _, d := range d {
+		log.Printf("Templates directory contains file: %s", d.Name())
+	}
+
 	t, err := template.ParseFiles(
 		"templates/base.html",
 		"templates/"+page+".html",
@@ -259,7 +271,14 @@ func main() {
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
+// todo: não deixar global
+var globalControl *git.Control
+
 func main() {
+
+	globalControl = new(git.Control)
+	globalControl.Init()
+
 	fs := http.FileServer(http.Dir("static"))
 	http.Handle("/static/", http.StripPrefix("/static/", fs))
 
@@ -271,11 +290,213 @@ func main() {
 	http.HandleFunc("/teste", testeHandler)
 
 	// API
-	http.HandleFunc("/api/files", apiListFiles)
-	http.HandleFunc("/api/read", apiReadFile)
 	http.HandleFunc("/api/save", apiSaveFile)
 	http.HandleFunc("/api/examples", apiCreateExamples)
+	http.HandleFunc("/api/files", filesHandler)
+	http.HandleFunc("/api/read", readHandler)
+
+	// Git endpoints
+	http.HandleFunc("/git/branchs", gitBranchHandler)
+	http.HandleFunc("/git/changes", getChanges)
+	http.HandleFunc("/git/diff", getDiff)
 
 	log.Println("Servidor rodando em http://localhost:8080")
 	log.Fatal(http.ListenAndServe(":8080", nil))
+}
+
+func setJsonHeaders(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+}
+
+func setError(w http.ResponseWriter, err error) {
+	serverErr := new(ErrorStr)
+	serverErr.Error = err.Error()
+	data, _ := json.Marshal(serverErr)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusInternalServerError)
+	w.Write(data)
+}
+
+// getChanges retorna a lista de arquivos modificados entre duas branches
+func getChanges(w http.ResponseWriter, r *http.Request) {
+	setJsonHeaders(w)
+
+	if !globalControl.IsInitialized() {
+		setError(
+			w,
+			errors.Join(
+				fmt.Errorf("no git control found"),
+				fmt.Errorf("please, use the endpoint /git/branchs?dir=/absolute/path"),
+			),
+		)
+		return
+	}
+
+	yourBranch := r.URL.Query().Get("yourBranch")
+	if yourBranch == "" {
+		setError(w, fmt.Errorf("yourBranch not provided"))
+		return
+	}
+
+	baseBranch := r.URL.Query().Get("baseBranch")
+	if baseBranch == "" {
+		setError(w, fmt.Errorf("baseBranch not provided"))
+		return
+	}
+
+	// Retorna apenas a lista de arquivos modificados
+	list, err := globalControl.GetModifiedFiles(yourBranch, baseBranch)
+	if err != nil {
+		setError(w, err)
+		return
+	}
+
+	data, _ := json.Marshal(&list)
+	_, _ = w.Write(data)
+}
+
+// getDiff retorna o diff de um arquivo específico com marcadores de conflito
+func getDiff(w http.ResponseWriter, r *http.Request) {
+	if !globalControl.IsInitialized() {
+		setError(
+			w,
+			errors.Join(
+				fmt.Errorf("no git control found"),
+				fmt.Errorf("please, use the endpoint /git/branchs?dir=/absolute/path"),
+			),
+		)
+		return
+	}
+
+	yourBranch := r.URL.Query().Get("yourBranch")
+	if yourBranch == "" {
+		setError(w, fmt.Errorf("yourBranch not provided"))
+		return
+	}
+
+	baseBranch := r.URL.Query().Get("baseBranch")
+	if baseBranch == "" {
+		setError(w, fmt.Errorf("baseBranch not provided"))
+		return
+	}
+
+	file := r.URL.Query().Get("file")
+	if file == "" {
+		setError(w, fmt.Errorf("file not provided"))
+		return
+	}
+
+	// Obtém o diff do arquivo específico
+	diffMap, err := globalControl.DiffSpecificFile(yourBranch, baseBranch, file)
+	if err != nil {
+		setError(w, err)
+		return
+	}
+
+	// Retorna o conteúdo do diff como texto simples
+	diff, exists := diffMap[file]
+	if !exists {
+		setError(w, fmt.Errorf("file not found in diff"))
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/plain")
+	w.Write([]byte(diff))
+}
+
+// gitBranchHandler Retorna a lista de todos os branchs do projeto.
+//
+//	Exemplo: http://localhost:8080/git/branchs?dir=/Users/kemper/go/kemper/gitMerge/testgit
+func gitBranchHandler(w http.ResponseWriter, r *http.Request) {
+	setJsonHeaders(w)
+
+	dir := r.URL.Query().Get("dir")
+	if dir == "" {
+		setError(w, fmt.Errorf("no dir provided"))
+		return
+	}
+
+	// Valida se o diretório existe
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		setError(w, fmt.Errorf("dir does not exist"))
+		return
+	}
+
+	if err := globalControl.NewRepoLocal(dir); err != nil {
+		setError(w, err)
+		return
+	}
+
+	list, err := globalControl.ListAllBranches()
+	if err != nil {
+		setError(w, err)
+		return
+	}
+
+	data, _ := json.Marshal(&list)
+	_, _ = w.Write(data)
+}
+
+func filesHandler(w http.ResponseWriter, r *http.Request) {
+	outputDir := r.URL.Query().Get("dir")
+	if outputDir == "" {
+		outputDir = "./output" // diretório padrão
+	}
+
+	var files []string
+
+	err := filepath.Walk(outputDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		// Ignora diretórios
+		if info.IsDir() {
+			return nil
+		}
+
+		// Obtém caminho relativo ao outputDir
+		relPath, err := filepath.Rel(outputDir, path)
+		if err != nil {
+			return err
+		}
+
+		// Normaliza para usar "/" em todos os SOs
+		files = append(files, filepath.ToSlash(relPath))
+		return nil
+	})
+
+	if err != nil {
+		http.Error(w, "Erro ao listar arquivos", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(files)
+}
+
+func readHandler(w http.ResponseWriter, r *http.Request) {
+	outputDir := "./output"
+	name := r.URL.Query().Get("name")
+	if name == "" {
+		http.Error(w, "Parâmetro 'name' não informado", http.StatusBadRequest)
+		return
+	}
+
+	// Garante que o caminho não escape do outputDir
+	fullPath := filepath.Join(outputDir, filepath.FromSlash(name))
+	if !strings.HasPrefix(filepath.Clean(fullPath), filepath.Clean(outputDir)) {
+		http.Error(w, "Caminho inválido", http.StatusBadRequest)
+		return
+	}
+
+	content, err := os.ReadFile(fullPath)
+	if err != nil {
+		http.Error(w, "Arquivo não encontrado", http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/plain")
+	w.Write(content)
 }

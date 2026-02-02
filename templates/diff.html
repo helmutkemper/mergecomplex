@@ -1,0 +1,819 @@
+{{define "content"}}
+<style>
+    .config-toolbar {
+        display: flex;
+        gap: 15px;
+        align-items: center;
+        padding: 15px;
+        background: #2d2d30;
+        border-bottom: 1px solid #3e3e42;
+        flex-wrap: wrap;
+    }
+    .config-group {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+    .config-group label {
+        font-size: 13px;
+        color: #cccccc;
+        white-space: nowrap;
+    }
+    .config-group input,
+    .config-group select {
+        padding: 6px 10px;
+        background: #3c3c3c;
+        border: 1px solid #555;
+        color: #cccccc;
+        border-radius: 3px;
+        font-size: 13px;
+    }
+    .config-group input:focus,
+    .config-group select:focus {
+        outline: none;
+        border-color: #007acc;
+    }
+</style>
+
+<div class="editor-content">
+    <div class="editor-header">
+        <h1><i class="fas fa-code-compare"></i> Diff Editor - Resolução de Conflitos</h1>
+        <div class="editor-controls">
+            <label for="language-select">
+                <i class="fas fa-code"></i> Linguagem:
+            </label>
+            <select id="language-select">
+                <option value="javascript">JavaScript</option>
+                <option value="typescript">TypeScript</option>
+                <option value="python">Python</option>
+                <option value="go">Go</option>
+                <option value="html">HTML</option>
+                <option value="css">CSS</option>
+                <option value="json">JSON</option>
+                <option value="markdown">Markdown</option>
+            </select>
+
+            <label for="theme-select">
+                <i class="fas fa-palette"></i> Tema:
+            </label>
+            <select id="theme-select">
+                <option value="vs">Visual Studio Light</option>
+                <option value="vs-dark" selected>Visual Studio Dark</option>
+                <option value="hc-black">High Contrast</option>
+            </select>
+
+            <label>
+                <input type="checkbox" id="inline-toggle" checked>
+                <i class="fas fa-columns"></i> Lado a lado
+            </label>
+        </div>
+    </div>
+
+    <!-- Configuração do projeto -->
+    <div class="config-toolbar">
+        <div class="config-group">
+            <label for="project-dir">
+                <i class="fas fa-folder"></i> Diretório do Projeto:
+            </label>
+            <input type="text" id="project-dir" placeholder="/caminho/para/seu/projeto" style="flex: 1; min-width: 300px;">
+            <button class="btn btn-secondary" id="btn-load-branches">
+                <i class="fas fa-code-branch"></i> Carregar Branches
+            </button>
+        </div>
+        <div class="config-group">
+            <label for="base-branch">
+                <i class="fas fa-code-branch"></i> Branch Base:
+            </label>
+            <select id="base-branch" style="min-width: 150px;" disabled>
+                <option value="">-- Selecione --</option>
+            </select>
+        </div>
+        <div class="config-group">
+            <label for="your-branch">
+                <i class="fas fa-code-branch"></i> Sua Branch:
+            </label>
+            <select id="your-branch" style="min-width: 150px;" disabled>
+                <option value="">-- Selecione --</option>
+            </select>
+        </div>
+        <button class="btn btn-primary" id="btn-load-changes" disabled>
+            <i class="fas fa-sync"></i> Carregar Alterações
+        </button>
+    </div>
+
+    <!-- Barra de arquivos + ações -->
+    <div class="conflict-toolbar">
+        <div class="conflict-toolbar-left">
+            <select id="file-select">
+                <option value="">-- Selecione um arquivo --</option>
+            </select>
+            <span id="conflict-count" class="conflict-badge">0 conflitos</span>
+        </div>
+        <div class="conflict-toolbar-right">
+            <button class="btn btn-secondary" id="btn-examples" title="Gera arquivos de exemplo com conflitos">
+                <i class="fas fa-plus-circle"></i> Criar Exemplos
+            </button>
+            <button class="btn btn-primary" id="btn-save" disabled title="Salvar arquivo resolvido">
+                <i class="fas fa-save"></i> Salvar
+            </button>
+        </div>
+    </div>
+
+    <!-- Labels original / modificado -->
+    <div class="diff-labels" id="diff-labels">
+        <div class="diff-label original">
+            <i class="fas fa-code-branch"></i> HEAD (seu branch)
+        </div>
+        <div class="diff-label modified">
+            <i class="fas fa-code-branch"></i> branch remota
+        </div>
+    </div>
+
+    <!-- Editor diff (cima) -->
+    <div id="editor-container"></div>
+
+    <!-- Painel inferior: resultado somente leitura -->
+    <div class="result-panel">
+        <div class="result-panel-header">
+            <span><i class="fas fa-file-code"></i> Resultado final</span>
+            <span id="result-status" class="result-status pending">
+                <i class="fas fa-circle"></i> Conflitos pendentes
+            </span>
+        </div>
+        <div id="result-editor"></div>
+    </div>
+</div>
+
+<script src="/static/monaco-editor/min/vs/loader.js"></script>
+<script>
+    require.config({
+        paths: { 'vs': '/static/monaco-editor/min/vs' }
+    });
+
+    require(['vs/editor/editor.main'], function () {
+
+        // =========================================================
+        // Estado global
+        // =========================================================
+        let diffEditor = null;
+        let resultEditor = null;
+        let modifiedEditor = null;
+        let currentFile = null;
+        let originalContent = '';
+        let modifiedContent = '';
+        let rawContent = '';
+        let currentRaw = '';
+        let conflictDecorationIds = [];
+        let currentConflictIndex = 0;
+        let navigationWidget = null;
+        let navigationWidgetLine = 0;
+        let currentProjectDir = '';
+        let currentBaseBranch = '';
+        let currentYourBranch = '';
+
+        // =========================================================
+        // Inicializa os dois editores
+        // =========================================================
+        function initEditors() {
+            diffEditor = monaco.editor.createDiffEditor(
+                document.getElementById('editor-container'),
+                {
+                    theme: 'vs-dark',
+                    automaticLayout: true,
+                    renderSideBySide: true,
+                    readOnly: true,
+                    fontSize: 14,
+                    minimap: { enabled: true },
+                    scrollBeyondLastLine: false,
+                    wordWrap: 'on',
+                }
+            );
+
+            resultEditor = monaco.editor.create(
+                document.getElementById('result-editor'),
+                {
+                    theme: 'vs-dark',
+                    automaticLayout: true,
+                    readOnly: true,
+                    fontSize: 14,
+                    minimap: { enabled: false },
+                    scrollBeyondLastLine: false,
+                    wordWrap: 'on',
+                    language: 'plaintext',
+                }
+            );
+        }
+
+        // =========================================================
+        // Carrega lista de branches do projeto
+        // =========================================================
+        function loadBranches() {
+            const projectDir = document.getElementById('project-dir').value.trim();
+            if (!projectDir) {
+                alert('Informe o diretório do projeto');
+                return;
+            }
+
+            fetch('/git/branchs?dir=' + encodeURIComponent(projectDir))
+                .then(r => r.json())
+                .then(function (branches) {
+
+                    const baseSelect = document.getElementById('base-branch');
+                    const yourSelect = document.getElementById('your-branch');
+
+                    baseSelect.innerHTML = '<option value="">-- Selecione --</option>';
+                    yourSelect.innerHTML = '<option value="">-- Selecione --</option>';
+
+                    branches.forEach(function (branchName) {
+                        const opt1 = document.createElement('option');
+                        opt1.value = branchName;
+                        opt1.textContent = branchName;
+                        baseSelect.appendChild(opt1);
+
+                        const opt2 = document.createElement('option');
+                        opt2.value = branchName;
+                        opt2.textContent = branchName;
+                        yourSelect.appendChild(opt2);
+                    });
+
+                    // Habilita os selects e o botão de carregar alterações
+                    baseSelect.disabled = false;
+                    yourSelect.disabled = false;
+                    document.getElementById('btn-load-changes').disabled = false;
+                })
+                .catch(function (err) {
+                    console.error('Erro ao carregar branches:', err);
+                    alert('Erro ao carregar branches. Verifique o diretório do projeto.');
+                });
+        }
+
+        // =========================================================
+        // Carrega arquivos modificados entre as branches
+        // =========================================================
+        function loadChanges() {
+            const projectDir = document.getElementById('project-dir').value.trim();
+            const baseBranch = document.getElementById('base-branch').value;
+            const yourBranch = document.getElementById('your-branch').value;
+
+            if (!projectDir || !baseBranch || !yourBranch) {
+                alert('Preencha todos os campos: diretório, branch base e sua branch');
+                return;
+            }
+
+            currentProjectDir = projectDir;
+            currentBaseBranch = baseBranch;
+            currentYourBranch = yourBranch;
+
+            const url = '/git/changes?dir=' + encodeURIComponent(projectDir) +
+                '&baseBranch=' + encodeURIComponent(baseBranch) +
+                '&yourBranch=' + encodeURIComponent(yourBranch);
+
+            fetch(url)
+                .then(r => r.json())
+                .then(function (files) {
+                    const select = document.getElementById('file-select');
+                    select.innerHTML = '<option value="">-- Selecione um arquivo --</option>';
+
+                    if (files.length === 0) {
+                        alert('Nenhum arquivo modificado encontrado entre as branches');
+                        return;
+                    }
+
+                    files.forEach(function (f) {
+                        const opt = document.createElement('option');
+                        opt.value = f;
+                        opt.textContent = f;
+                        select.appendChild(opt);
+                    });
+                })
+                .catch(function (err) {
+                    console.error('Erro ao carregar alterações:', err);
+                    alert('Erro ao carregar alterações.');
+                });
+        }
+
+        // =========================================================
+        // Sincroniza scroll do resultEditor com o modifiedEditor
+        // =========================================================
+        let syncingScroll = false;
+
+        function buildResultLineMap() {
+            let modLine = 0;
+            let resLine = 0;
+            let map = {};
+            let mode = 'base';
+            let rawLines = currentRaw.split('\n');
+
+            for (let i = 0; i < rawLines.length; i++) {
+                if (rawLines[i].startsWith('<<<<<<< ')) { mode = 'ours'; continue; }
+                if (rawLines[i].startsWith('======='))  { mode = 'theirs'; continue; }
+                if (rawLines[i].startsWith('>>>>>>> ')) { mode = 'base'; continue; }
+
+                if (mode === 'base') {
+                    modLine++;
+                    resLine++;
+                    map[modLine] = resLine;
+                } else if (mode === 'ours') {
+                    resLine++;
+                } else if (mode === 'theirs') {
+                    modLine++;
+                    map[modLine] = resLine;
+                }
+            }
+            return map;
+        }
+
+        function setupScrollSync() {
+            if (!modifiedEditor || !resultEditor) return;
+
+            let lineMap = {};
+
+            function refreshMap() {
+                lineMap = buildResultLineMap();
+            }
+            refreshMap();
+
+            modifiedEditor.onDidScrollChange(function (e) {
+                if (syncingScroll) return;
+                refreshMap();
+
+                const visibleRanges = modifiedEditor.getVisibleRanges();
+                if (visibleRanges.length === 0) return;
+
+                const topLine = visibleRanges[0].startLineNumber;
+                const mappedLine = lineMap[topLine] || topLine;
+
+                syncingScroll = true;
+                resultEditor.revealLineInCenter(mappedLine);
+                syncingScroll = false;
+            });
+
+            resultEditor.onDidScrollChange(function (e) {
+                if (syncingScroll) return;
+                refreshMap();
+
+                let reverseMap = {};
+                Object.keys(lineMap).forEach(function (mod) {
+                    reverseMap[lineMap[mod]] = parseInt(mod);
+                });
+
+                const visibleRanges = resultEditor.getVisibleRanges();
+                if (visibleRanges.length === 0) return;
+
+                const topLine = visibleRanges[0].startLineNumber;
+                const mappedLine = reverseMap[topLine] || topLine;
+
+                syncingScroll = true;
+                modifiedEditor.revealLineInCenter(mappedLine);
+                syncingScroll = false;
+            });
+        }
+
+        // =========================================================
+        // Parsing: separa blocos de conflito do arquivo raw
+        // =========================================================
+        function parseConflicts(raw) {
+            const lines = raw.split('\n');
+            let ours = [];
+            let theirs = [];
+            let conflicts = [];
+            let mode = 'base';
+            let conflict = null;
+
+            for (const line of lines) {
+                if (line.startsWith('<<<<<<< ')) {
+                    mode = 'ours';
+                    conflict = { ours: [], theirs: [] };
+                    continue;
+                }
+                if (line.startsWith('=======')) {
+                    mode = 'theirs';
+                    continue;
+                }
+                if (line.startsWith('>>>>>>> ')) {
+                    mode = 'base';
+                    conflicts.push(conflict);
+                    ours.push(...conflict.ours);
+                    theirs.push(...conflict.theirs);
+                    conflict = null;
+                    continue;
+                }
+
+                if (mode === 'ours') {
+                    conflict.ours.push(line);
+                } else if (mode === 'theirs') {
+                    conflict.theirs.push(line);
+                } else {
+                    ours.push(line);
+                    theirs.push(line);
+                }
+            }
+
+            return {
+                ours: ours.join('\n'),
+                theirs: theirs.join('\n'),
+                conflicts: conflicts,
+                hasConflicts: conflicts.length > 0
+            };
+        }
+
+        // =========================================================
+        // Encontra blocos de conflito no texto com marcadores
+        // =========================================================
+        function findConflictsInText(text) {
+            const lines = text.split('\n');
+            let conflicts = [];
+            let current = null;
+
+            for (let i = 0; i < lines.length; i++) {
+                if (lines[i].startsWith('<<<<<<< ')) {
+                    current = { startLine: i + 1, separatorLine: 0, endLine: 0 };
+                    continue;
+                }
+                if (current && current.separatorLine === 0 && lines[i].startsWith('=======')) {
+                    current.separatorLine = i + 1;
+                    continue;
+                }
+                if (current && lines[i].startsWith('>>>>>>> ')) {
+                    current.endLine = i + 1;
+                    conflicts.push(current);
+                    current = null;
+                    continue;
+                }
+            }
+            return conflicts;
+        }
+
+        // =========================================================
+        // Gera texto resolvido a partir de um raw
+        // =========================================================
+        function generateResolved(raw, useTheirs) {
+            const lines = raw.split('\n');
+            let result = [];
+            let mode = 'base';
+
+            for (const line of lines) {
+                if (line.startsWith('<<<<<<< ')) { mode = 'ours'; continue; }
+                if (line.startsWith('======='))  { mode = 'theirs'; continue; }
+                if (line.startsWith('>>>>>>> ')) { mode = 'base'; continue; }
+
+                if (mode === 'ours' && !useTheirs)       { result.push(line); }
+                else if (mode === 'theirs' && useTheirs) { result.push(line); }
+                else if (mode === 'base')                { result.push(line); }
+            }
+            return result.join('\n');
+        }
+
+        // =========================================================
+        // Monta mapeamento: conflito N -> linha no modifiedEditor
+        // =========================================================
+        function buildModifiedLinePositions() {
+            let positions = [];
+            let rawLines = currentRaw.split('\n');
+            let modLine = 0;
+            let mode = 'base';
+            let conflictIdx = 0;
+
+            for (let i = 0; i < rawLines.length; i++) {
+                if (rawLines[i].startsWith('<<<<<<< ')) {
+                    mode = 'ours';
+                    continue;
+                }
+                if (rawLines[i].startsWith('=======')) {
+                    mode = 'theirs';
+                    positions[conflictIdx] = modLine + 1;
+                    continue;
+                }
+                if (rawLines[i].startsWith('>>>>>>> ')) {
+                    mode = 'base';
+                    conflictIdx++;
+                    continue;
+                }
+                if (mode === 'base' || mode === 'theirs') {
+                    modLine++;
+                }
+            }
+            return positions;
+        }
+
+        // =========================================================
+        // Renderiza: decorações em todos os blocos +
+        // um único widget de navegação no conflito atual
+        // =========================================================
+        function renderConflictButtons() {
+            if (!modifiedEditor) return;
+
+            if (conflictDecorationIds.length > 0) {
+                modifiedEditor.deltaDecorations(conflictDecorationIds, []);
+                conflictDecorationIds = [];
+            }
+
+            if (navigationWidget) {
+                modifiedEditor.removeContentWidget(navigationWidget);
+                navigationWidget = null;
+            }
+
+            const conflicts = findConflictsInText(currentRaw);
+            const positions = buildModifiedLinePositions();
+
+            if (conflicts.length === 0) {
+                updateConflictStatus(0);
+                return;
+            }
+
+            if (currentConflictIndex >= conflicts.length) {
+                currentConflictIndex = 0;
+            }
+
+            let decorations = [];
+            conflicts.forEach(function (conflict, index) {
+                const targetLine = positions[index] || 1;
+                const isActive = (index === currentConflictIndex);
+
+                const conflict_raw = findConflictsInText(currentRaw)[index];
+                const theirsStart = conflict_raw.separatorLine + 1;
+                const theirsEnd   = conflict_raw.endLine - 1;
+
+                if (theirsEnd >= theirsStart) {
+                    decorations.push({
+                        range: new monaco.Range(targetLine, 1, targetLine + (theirsEnd - theirsStart), 2),
+                        options: {
+                            isWholeLine: true,
+                            backgroundColor: isActive
+                                ? 'rgba(80, 180, 80, 0.30)'
+                                : 'rgba(80, 180, 80, 0.10)',
+                            borderColor: isActive ? 'rgba(80, 180, 80, 0.6)' : 'transparent',
+                            borderWidth: isActive ? '1px' : '0',
+                            borderStyle: 'solid',
+                        }
+                    });
+                }
+            });
+
+            conflictDecorationIds = modifiedEditor.deltaDecorations([], decorations);
+
+            const targetLine = positions[currentConflictIndex] || 1;
+            const total = conflicts.length;
+
+            const domNode = document.createElement('div');
+            domNode.className = 'conflict-action-buttons';
+            domNode.innerHTML =
+                '<button class="conflict-btn conflict-nav conflict-nav-prev" title="Conflito anterior">' +
+                '<i class="fas fa-chevron-left"></i>' +
+                '</button>' +
+                '<span class="conflict-action-label">' + (currentConflictIndex + 1) + ' / ' + total + '</span>' +
+                '<button class="conflict-btn conflict-nav conflict-nav-next" title="Próximo conflito">' +
+                '<i class="fas fa-chevron-right"></i>' +
+                '</button>' +
+                '<div class="conflict-action-divider"></div>' +
+                '<button class="conflict-btn conflict-btn-ours">' +
+                '<i class="fas fa-arrow-left"></i> HEAD' +
+                '</button>' +
+                '<button class="conflict-btn conflict-btn-both">' +
+                '<i class="fas fa-arrows-alt-v"></i>' +
+                '</button>' +
+                '<button class="conflict-btn conflict-btn-theirs">' +
+                'Remota <i class="fas fa-arrow-right"></i>' +
+                '</button>';
+
+            domNode.querySelector('.conflict-nav-prev').addEventListener('click', function () {
+                currentConflictIndex = (currentConflictIndex - 1 + total) % total;
+                renderConflictButtons();
+            });
+            domNode.querySelector('.conflict-nav-next').addEventListener('click', function () {
+                currentConflictIndex = (currentConflictIndex + 1) % total;
+                renderConflictButtons();
+            });
+
+            domNode.querySelector('.conflict-btn-ours').addEventListener('click', function () {
+                resolveConflictAt(currentConflictIndex, 'ours');
+            });
+            domNode.querySelector('.conflict-btn-both').addEventListener('click', function () {
+                resolveConflictAt(currentConflictIndex, 'both');
+            });
+            domNode.querySelector('.conflict-btn-theirs').addEventListener('click', function () {
+                resolveConflictAt(currentConflictIndex, 'theirs');
+            });
+
+            navigationWidgetLine = targetLine;
+            navigationWidget = {
+                getId: function () { return 'conflict-navigation-widget'; },
+                getDomNode: function () { return domNode; },
+                getPosition: function () {
+                    return {
+                        position: { lineNumber: navigationWidgetLine, column: 1 },
+                        range: new monaco.Range(navigationWidgetLine, 1, navigationWidgetLine, 2),
+                        preference: [
+                            monaco.editor.ContentWidgetPositionPreference.ABOVE,
+                            monaco.editor.ContentWidgetPositionPreference.BELOW
+                        ]
+                    };
+                }
+            };
+
+            modifiedEditor.addContentWidget(navigationWidget);
+            modifiedEditor.revealLineInCenter(targetLine);
+
+            updateConflictStatus(total);
+        }
+
+        // =========================================================
+        // Resolve um bloco específico pelo índice dentro do currentRaw
+        // =========================================================
+        function resolveConflictAt(index, mode) {
+            const lines = currentRaw.split('\n');
+            const conflicts = findConflictsInText(currentRaw);
+
+            if (index >= conflicts.length) return;
+            const conflict = conflicts[index];
+
+            const oursLines   = lines.slice(conflict.startLine, conflict.separatorLine - 1);
+            const theirsLines = lines.slice(conflict.separatorLine, conflict.endLine - 1);
+
+            let replacement = [];
+            if (mode === 'ours')   { replacement = oursLines; }
+            if (mode === 'theirs') { replacement = theirsLines; }
+            if (mode === 'both')   { replacement = oursLines.concat(theirsLines); }
+
+            const before = lines.slice(0, conflict.startLine - 1);
+            const after  = lines.slice(conflict.endLine);
+            currentRaw = before.concat(replacement).concat(after).join('\n');
+
+            resultEditor.setValue(generateResolved(currentRaw, false));
+
+            const lang = resultEditor.getModel().getLanguageId();
+            const parsed = parseConflicts(currentRaw);
+            originalContent = parsed.ours;
+            modifiedContent = parsed.theirs;
+
+            diffEditor.setModel({
+                original: monaco.editor.createModel(originalContent, lang),
+                modified: monaco.editor.createModel(modifiedContent, lang),
+            });
+
+            modifiedEditor = diffEditor.getModifiedEditor();
+            setupScrollSync();
+
+            const remaining = findConflictsInText(currentRaw).length;
+            if (remaining > 0 && currentConflictIndex >= remaining) {
+                currentConflictIndex = remaining - 1;
+            }
+
+            renderConflictButtons();
+        }
+
+        // =========================================================
+        // Atualiza badge e status
+        // =========================================================
+        function updateConflictStatus(count) {
+            const badge = document.getElementById('conflict-count');
+            const status = document.getElementById('result-status');
+
+            badge.textContent = count + ' conflito' + (count !== 1 ? 's' : '');
+            badge.className = 'conflict-badge ' + (count > 0 ? 'has-conflicts' : 'resolved');
+
+            if (count === 0) {
+                status.innerHTML = '<i class="fas fa-check-circle"></i> Resolvido';
+                status.className = 'result-status resolved';
+                document.getElementById('btn-save').disabled = false;
+            } else {
+                status.innerHTML = '<i class="fas fa-circle"></i> Conflitos pendentes';
+                status.className = 'result-status pending';
+                document.getElementById('btn-save').disabled = true;
+            }
+        }
+
+        // =========================================================
+        // Carrega arquivo no editor
+        // =========================================================
+        function loadFile(filename) {
+            if (!filename) return;
+            currentFile = filename;
+
+            const url = '/git/diff?dir=' + encodeURIComponent(currentProjectDir) +
+                '&baseBranch=' + encodeURIComponent(currentBaseBranch) +
+                '&yourBranch=' + encodeURIComponent(currentYourBranch) +
+                '&file=' + encodeURIComponent(filename);
+
+            fetch(url)
+                .then(r => r.text())
+                .then(function (content) {
+                    rawContent = content;
+                    currentRaw = content;
+                    currentConflictIndex = 0;
+
+                    const parsed = parseConflicts(content);
+                    originalContent = parsed.ours;
+                    modifiedContent = parsed.theirs;
+
+                    const lang = detectLanguage(filename);
+                    document.getElementById('language-select').value = lang;
+
+                    diffEditor.setModel({
+                        original: monaco.editor.createModel(originalContent, lang),
+                        modified: monaco.editor.createModel(modifiedContent, lang),
+                    });
+
+                    modifiedEditor = diffEditor.getModifiedEditor();
+                    setupScrollSync();
+
+                    monaco.editor.setModelLanguage(resultEditor.getModel(), lang);
+                    resultEditor.setValue(generateResolved(currentRaw, false));
+
+                    renderConflictButtons();
+                })
+                .catch(function (err) {
+                    console.error('Erro ao carregar arquivo:', err);
+                    alert('Erro ao carregar diff do arquivo');
+                });
+        }
+
+        // =========================================================
+        // Detecta linguagem pelo nome do arquivo
+        // =========================================================
+        function detectLanguage(filename) {
+            const map = {
+                '.go': 'go', '.js': 'javascript', '.ts': 'typescript',
+                '.py': 'python', '.html': 'html', '.css': 'css',
+                '.json': 'json', '.md': 'markdown', '.yaml': 'yaml',
+                '.yml': 'yaml', '.xml': 'xml', '.java': 'java',
+                '.c': 'c', '.cpp': 'cpp', '.h': 'c', '.rs': 'rust',
+            };
+            const ext = filename.substring(filename.lastIndexOf('.'));
+            return map[ext] || 'plaintext';
+        }
+
+        // =========================================================
+        // Salva arquivo resolvido
+        // =========================================================
+        function saveFile() {
+            if (!currentFile) return;
+
+            const url = '/git/save?dir=' + encodeURIComponent(currentProjectDir) +
+                '&file=' + encodeURIComponent(currentFile);
+
+            fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    content: resultEditor.getValue()
+                })
+            })
+                .then(r => r.json())
+                .then(function () {
+                    document.getElementById('result-status').innerHTML =
+                        '<i class="fas fa-check-circle"></i> Salvo com sucesso';
+                })
+                .catch(function (err) {
+                    console.error('Erro ao salvar:', err);
+                    alert('Erro ao salvar arquivo');
+                });
+        }
+
+        // =========================================================
+        // Eventos
+        // =========================================================
+        document.getElementById('btn-load-branches').addEventListener('click', loadBranches);
+
+        document.getElementById('btn-load-changes').addEventListener('click', loadChanges);
+
+        document.getElementById('file-select').addEventListener('change', function (e) {
+            loadFile(e.target.value);
+        });
+
+        document.getElementById('language-select').addEventListener('change', function (e) {
+            const lang = e.target.value;
+            if (diffEditor && diffEditor.getOriginalEditor().getModel()) {
+                monaco.editor.setModelLanguage(diffEditor.getOriginalEditor().getModel(), lang);
+                monaco.editor.setModelLanguage(diffEditor.getModifiedEditor().getModel(), lang);
+            }
+            if (resultEditor) {
+                monaco.editor.setModelLanguage(resultEditor.getModel(), lang);
+            }
+        });
+
+        document.getElementById('theme-select').addEventListener('change', function (e) {
+            monaco.editor.setTheme(e.target.value);
+        });
+
+        document.getElementById('inline-toggle').addEventListener('change', function (e) {
+            if (diffEditor) diffEditor.updateOptions({ renderSideBySide: e.target.checked });
+        });
+
+        document.getElementById('btn-save').addEventListener('click', saveFile);
+
+        document.getElementById('btn-examples').addEventListener('click', function () {
+            fetch('/api/examples', { method: 'POST' })
+                .then(function () {
+                    alert('Exemplos criados! Recarregue a página para testar.');
+                })
+                .catch(function (err) { console.error(err); });
+        });
+
+        // =========================================================
+        // Init
+        // =========================================================
+        initEditors();
+    });
+</script>
+{{end}}
